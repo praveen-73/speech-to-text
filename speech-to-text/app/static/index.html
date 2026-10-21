@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boli – Speech to Text</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;700&family=Noto+Sans+Devanagari:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#EEF1F5; --surface:#FFFFFF; --ink:#16213A; --muted:#5B6579; --line:#D9DFE8;
+  --accent:#2E4BD8; --accent-ink:#fff; --rec:#D6293E; --ok:#1C8C5E;
+}
+@media (prefers-color-scheme: dark){
+  :root{--bg:#0E1424; --surface:#161E33; --ink:#E8ECF7; --muted:#97A2BC; --line:#2A3452; --accent:#7C93FF; --accent-ink:#0E1424; --rec:#FF5A6E;}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 "Noto Sans","Noto Sans Devanagari",system-ui,sans-serif}
+header{padding:28px clamp(16px,4vw,48px) 8px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+header h1{margin:0;font-size:1.6rem;letter-spacing:-.01em}
+header p{margin:0;color:var(--muted)}
+main{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:24px;padding:16px clamp(16px,4vw,48px) 48px;max-width:1400px;margin:auto}
+@media (max-width:900px){main{grid-template-columns:1fr}}
+section{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:20px}
+h2{margin:0 0 14px;font-size:1.05rem}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+select,input,textarea,button{font:inherit;color:inherit}
+select,input,textarea{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
+button{border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:8px 14px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+button.rec{background:var(--rec);color:#fff;border-color:var(--rec)}
+button.danger{color:var(--rec)}
+button.small{padding:4px 10px;font-size:.85rem}
+.status{font-size:.9rem;color:var(--muted);display:flex;align-items:center;gap:8px}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--line)}
+.live .dot{background:var(--rec);animation:pulse 1.2s infinite}
+@keyframes pulse{50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.live .dot{animation:none}}
+#meter{height:6px;background:var(--line);border-radius:3px;margin-top:14px;overflow:hidden}
+#meter i{display:block;height:100%;width:0;background:var(--ok);transition:width .1s}
+#transcript{margin-top:8px;min-height:220px;max-height:46vh;overflow:auto;padding:14px;border:1px dashed var(--line);border-radius:8px;font-size:1.1rem;line-height:1.7;white-space:pre-wrap}
+#transcript .partial{color:var(--muted)}
+#transcript:empty::before{content:"Press Start and speak – Hindi, English, or both in one sentence.";color:var(--muted)}
+.item{padding:14px 0;border-top:1px solid var(--line)}
+.item:first-child{border-top:0}
+.item h3{margin:0;font-size:1rem}
+.meta{color:var(--muted);font-size:.8rem;margin:2px 0 6px}
+.item p{margin:0 0 10px;white-space:pre-wrap}
+.empty{color:var(--muted);padding:20px 0}
+dialog{border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);width:min(560px,92vw)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+dialog label{display:block;margin:10px 0 4px;font-size:.85rem;color:var(--muted)}
+dialog input,dialog textarea{width:100%}
+dialog textarea{min-height:180px}
+#toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 16px;border-radius:6px;opacity:0;pointer-events:none;transition:opacity .2s}
+#toast.on{opacity:1}
+</style>
+</head>
+<body>
+<header>
+  <h1>Boli</h1>
+  <p>Real-time speech to text for Hindi + English</p>
+</header>
+
+<main>
+  <section aria-labelledby="rec-h">
+    <h2 id="rec-h">Live transcription</h2>
+    <div class="row">
+      <select id="lang" aria-label="Language">
+        <option value="hi-en">Hindi + English (mixed)</option>
+        <option value="hi">Hindi</option>
+        <option value="en">English</option>
+        <option value="auto">Auto-detect</option>
+      </select>
+      <button id="toggle" class="primary">Start</button>
+      <span class="status" id="status"><span class="dot"></span><span id="statusText">Idle</span></span>
+    </div>
+    <div id="meter" title="Microphone level"><i></i></div>
+    <div id="transcript" aria-live="polite"></div>
+    <div class="row" style="margin-top:14px">
+      <input id="title" placeholder="Title (optional)" style="flex:1;min-width:140px">
+      <button id="save">Save transcript</button>
+      <button id="clear">Clear</button>
+    </div>
+  </section>
+
+  <section aria-labelledby="hist-h">
+    <div class="row" style="justify-content:space-between;margin-bottom:6px">
+      <h2 id="hist-h" style="margin:0">History</h2>
+      <input id="search" type="search" placeholder="Search transcripts" aria-label="Search transcripts">
+    </div>
+    <div id="list"></div>
+  </section>
+</main>
+
+<dialog id="dlg">
+  <form method="dialog" id="dlgForm">
+    <h2 id="dlgTitle">Edit transcript</h2>
+    <label for="eTitle">Title</label><input id="eTitle">
+    <label for="eText">Text</label><textarea id="eText"></textarea>
+    <div class="row" style="justify-content:flex-end;margin-top:14px">
+      <button value="cancel">Cancel</button>
+      <button value="ok" class="primary" id="eSave">Save changes</button>
+    </div>
+  </form>
+</dialog>
+<div id="toast" role="status"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const api = '/api/transcriptions';
+let gotAudio=false, ws, ctx, stream, node, running = false, startedAt = 0, finals = [], partial = '', editingId = null;
+
+/* ---------- toast ---------- */
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('on'); setTimeout(()=>t.classList.remove('on'),2200); }
+
+/* ---------- live transcript ---------- */
+function render(){
+  const el = $('transcript'); el.textContent = '';
+  if (finals.length) el.append(finals.join(' '));
+  if (partial){ const s=document.createElement('span'); s.className='partial'; s.textContent=(finals.length?' ':'')+partial; el.append(s); }
+  el.scrollTop = el.scrollHeight;
+}
+function setStatus(text, live){ $('statusText').textContent=text; $('status').classList.toggle('live', !!live); }
+
+/* AudioWorklet: 16 kHz mono float -> Int16 blocks of 4096 samples (~256 ms) */
+const workletSrc = `
+class Pcm extends AudioWorkletProcessor{
+  constructor(){super();this.b=new Int16Array(4096);this.i=0;}
+  process(inputs){
+    const ch=inputs[0][0]; if(!ch) return true;
+    for(let k=0;k<ch.length;k++){
+      const s=Math.max(-1,Math.min(1,ch[k]));
+      this.b[this.i++]=s<0?s*32768:s*32767;
+      if(this.i===4096){this.port.postMessage(this.b.slice().buffer);this.i=0;}
+    }
+    return true;
+  }
+}
+registerProcessor('pcm',Pcm);`;
+
+async function start(){
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:false,noiseSuppression:false,autoGainControl:true}});
+  }catch(e){ toast('Microphone access was blocked. Allow it in your browser and try again.'); return; }
+
+  ctx = new AudioContext({sampleRate:16000});
+  await ctx.resume();
+  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([workletSrc],{type:'application/javascript'})));
+  node = new AudioWorkletNode(ctx,'pcm');
+  const mute = ctx.createGain(); mute.gain.value = 0;   // keeps the graph "pulled" so the worklet always runs
+  ctx.createMediaStreamSource(stream).connect(node);
+  node.connect(mute).connect(ctx.destination);
+
+  const proto = location.protocol==='https:'?'wss':'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws/transcribe?lang=${encodeURIComponent($('lang').value)}`);
+  ws.binaryType='arraybuffer';
+  ws.onopen = ()=>{ setStatus('Listening…',true); };
+  ws.onmessage = ev=>{
+    const m = JSON.parse(ev.data);
+    if (m.type==='partial'){ partial=m.text; }
+    else if (m.type==='final'){ finals.push(m.text); partial=''; }
+    else if (m.type==='error'){ toast('Server error: '+m.text); }
+    else if (m.type==='info'){ toast(m.text); }
+    else if (m.type==='level'){ gotAudio=true; $('meter').firstElementChild.style.width=Math.min(100,m.rms*1500)+'%'; return; }
+    render();
+  };
+  ws.onclose = ()=>{ if(running) stop(); };
+  node.port.onmessage = e=>{ if(ws.readyState===1) ws.send(e.data); };
+
+  gotAudio=false;
+  setTimeout(()=>{ if(running && !gotAudio) toast('Connected, but no audio is reaching the server. Check the microphone and the terminal for errors.'); }, 4000);
+  running=true; startedAt=Date.now();
+  $('toggle').textContent='Stop'; $('toggle').className='rec';
+  $('lang').disabled=true;
+}
+
+async function stop(){
+  running=false;
+  $('toggle').textContent='Start'; $('toggle').className='primary'; $('lang').disabled=false;
+  setStatus('Finishing…');
+  stream && stream.getTracks().forEach(t=>t.stop());
+  ctx && ctx.close();
+  const sock = ws;
+  const done = ()=>{ if(!sock) return; sock.onclose=null; try{sock.close();}catch(e){}
+                     if(partial){ finals.push(partial); partial=''; render(); } setStatus('Idle'); };
+  if(sock && sock.readyState===1){
+    // ask the server to finalise the last words, and only close once it has answered
+    const prev = sock.onmessage;
+    sock.onmessage = ev=>{ prev(ev); if(JSON.parse(ev.data).type==='flushed') done(); };
+    sock.send('flush');
+    setTimeout(done, 30000);   // safety net on very slow machines
+  } else done();
+}
+
+$('toggle').onclick = ()=> running ? stop() : start();
+$('clear').onclick = ()=>{ finals=[]; partial=''; $('title').value=''; render(); };
+
+$('save').onclick = async ()=>{
+  const text = [...finals, partial].filter(Boolean).join(' ').trim();
+  if(!text){ toast('Nothing to save yet. Record something first.'); return; }
+  const body = { title: $('title').value.trim() || 'Transcript '+new Date().toLocaleString(), text, language: $('lang').value,
+                 duration_sec: startedAt ? (Date.now()-startedAt)/1000 : 0 };
+  const r = await fetch(api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(r.ok){ toast('Saved'); $('clear').click(); load(); } else toast('Could not save. Try again.');
+};
+
+/* ---------- history (CRUD) ---------- */
+let searchTimer;
+$('search').oninput = ()=>{ clearTimeout(searchTimer); searchTimer=setTimeout(load,250); };
+
+async function load(){
+  const q = $('search').value.trim();
+  const r = await fetch(api + (q?`?q=${encodeURIComponent(q)}`:''));
+  const items = await r.json();
+  const list = $('list'); list.textContent='';
+  if(!items.length){ list.innerHTML='<div class="empty">No transcripts yet. Record one and press Save.</div>'; return; }
+  for(const it of items){
+    const d=document.createElement('div'); d.className='item';
+    const h=document.createElement('h3'); h.textContent=it.title;
+    const m=document.createElement('div'); m.className='meta';
+    m.textContent=`${new Date(it.created_at).toLocaleString()} · ${it.language} · ${Math.round(it.duration_sec)}s`;
+    const p=document.createElement('p'); p.textContent=it.text;
+    const row=document.createElement('div'); row.className='row';
+    row.append(btn('Edit',()=>openEdit(it)), btn('Copy',()=>{navigator.clipboard.writeText(it.text);toast('Copied');}), btn('Delete',()=>del(it),'danger'));
+    d.append(h,m,p,row); list.append(d);
+  }
+}
+function btn(label,fn,cls=''){ const b=document.createElement('button'); b.className='small '+cls; b.textContent=label; b.onclick=fn; return b; }
+
+function openEdit(it){ editingId=it.id; $('eTitle').value=it.title; $('eText').value=it.text; $('dlg').showModal(); }
+$('dlg').addEventListener('close', async ()=>{
+  if($('dlg').returnValue!=='ok' || editingId==null) return;
+  const r = await fetch(`${api}/${editingId}`,{method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({title:$('eTitle').value, text:$('eText').value})});
+  toast(r.ok?'Changes saved':'Could not save changes'); editingId=null; load();
+});
+async function del(it){
+  if(!confirm(`Delete "${it.title}"? This cannot be undone.`)) return;
+  const r = await fetch(`${api}/${it.id}`,{method:'DELETE'});
+  toast(r.ok?'Deleted':'Could not delete'); load();
+}
+
+load();
+</script>
+</body>
+</html>
